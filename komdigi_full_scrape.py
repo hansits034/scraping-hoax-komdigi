@@ -16,8 +16,26 @@ MAX_PAGES = 3  # Ubah jumlah halaman yang ingin diambil
 
 def setup_driver():
     options = webdriver.ChromeOptions()
+    # --- PENGATURAN WAJIB UNTUK GITHUB ACTIONS / SERVER ---
+    
+    # 1. Mode tanpa layar (Headless) - Wajib di server
+    options.add_argument("--headless=new") 
+    
+    # 2. Mengatur ukuran layar virtual agar elemen 'terlihat' oleh kode
     options.add_argument("--start-maximized")
+    options.add_argument("--window-size=1920,1080")
+    
+    # 3. Mengatasi isu permission & memori di Linux/Docker container
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage") # Penting agar tidak crash memori
+    options.add_argument("--disable-gpu")
+    options.add_argument("--remote-debugging-port=9222")
+
+    # 4. Anti-Deteksi Bot (Agar tidak diblokir Cloudflare/WAF)
+    options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--disable-notifications")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     return driver
 
@@ -190,4 +208,5 @@ if __name__ == "__main__":
     finally:
         print("Menutup browser...")
         driver.quit()
+
 
