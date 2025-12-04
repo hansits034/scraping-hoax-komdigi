@@ -1,0 +1,35 @@
+name: Daily Hoax Scraper
+
+on:
+  schedule:
+    - cron: '0 */4 * * *' # Jalan tiap jam 06.00 WIB (23.00 UTC)
+  workflow_dispatch: # Agar bisa diklik manual tombol "Run"
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Chrome & Dependencies
+        run: |
+          pip install pandas selenium webdriver-manager
+          # Chrome sudah terinstall di ubuntu-latest, tapi driver perlu manager
+
+      - name: Run Scraper Script
+        run: python komdigi_full_scrape.py
+
+      - name: Commit and Push Data
+        run: |
+          git config --global user.name "GitHub Action Bot"
+          git config --global user.email "actions@github.com"
+          git add hoax_data_complete.csv
+          git commit -m "Auto-update data hoax: $(date)" || echo "No changes to commit"
+          git push
