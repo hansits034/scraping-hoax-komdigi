@@ -7,7 +7,7 @@ on:
     # '0 */4 * * *' artinya menit ke-0, setiap 4 jam sekali
     # (00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC)
     # -------------------------------------------------------
-    - cron: '0 */4 * * *'
+    - cron: '0 17 * * *'
   workflow_dispatch: # Tombol manual run
 
 permissions:
