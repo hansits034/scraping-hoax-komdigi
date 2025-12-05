@@ -2,18 +2,23 @@ name: 4-Hourly Hoax Scraper
 
 on:
   schedule:
-    # Jalan setiap 4 jam (00:00, 04:00, 08:00 UTC, dst)
-    # Waktu Indonesia (WIB) = Jam UTC + 7
-    - cron: '0 17 * * *'
-  workflow_dispatch: # Agar bisa di-klik tombol "Run workflow" manual untuk tes
+    # -------------------------------------------------------
+    # PERBAIKAN CRON:
+    # '0 */4 * * *' artinya menit ke-0, setiap 4 jam sekali
+    # (00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC)
+    # -------------------------------------------------------
+    - cron: '0 */4 * * *'
+  workflow_dispatch: # Tombol manual run
 
-# Memberikan izin kepada bot untuk melakukan 'git push'
 permissions:
   contents: write
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    # Set batas waktu manual di 350 menit (kurang dari 6 jam) 
+    # untuk jaga-jaga agar tidak terkena hard limit GitHub
+    timeout-minutes: 350 
 
     steps:
       - name: Checkout Repository
@@ -24,28 +29,53 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install Chrome & Python Dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pandas selenium webdriver-manager
-          # Chrome browser sudah terinstall otomatis di ubuntu-latest
 
       - name: Run Scraper Script
-        # Script Anda sudah handle mode headless, jadi aman dijalankan langsung
+        id: run_script
+        # continue-on-error: true <-- Opsi ini bisa dinyalakan jika kamu mau 
+        # step 'Upload Artifact' tetap jalan meskipun script Python error/crash.
         run: python scrape.py
 
+      # ========================================================
+      # SAVE PROGRESS: ARTIFACT (BACKUP)
+      # ========================================================
+      # Step ini akan meng-upload file CSV ke server GitHub Actions
+      # Gunanya: Jika commit gagal atau script error, kamu masih punya backup data.
+      # File ini bisa didownload di tab "Summary" pada workflow run tersebut.
+      - name: Upload CSV Artifact (Backup)
+        if: always() # 'always()' memastikan ini tetap jalan walau step sebelumnya error
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrape-result-backup
+          path: hoax_data_complete.csv
+          retention-days: 5 # File backup disimpan selama 5 hari
+
+      # ========================================================
+      # COMMIT & PUSH
+      # ========================================================
       - name: Commit and Push Data
+        # Hanya jalankan commit jika script python tadi SUKSES
+        if: steps.run_script.outcome == 'success'
         run: |
-          # Konfigurasi Git Bot
           git config --global user.name "GitHub Action Bot"
           git config --global user.email "actions@github.com"
           
-          # Tambahkan file CSV hasil scraping
+          # Tambahkan file
           git add hoax_data_complete.csv
           
-          # Commit hanya jika ada perubahan data
-          timestamp=$(date -u)
-          git commit -m "Auto-update data: ${timestamp}" || echo "No changes to commit"
-          
-          # Push ke repository
-          git push
+          # Cek status, commit hanya jika ada perubahan
+          # "git diff-index" cara aman cek perubahan
+          if git diff-index --quiet HEAD; then
+            echo "No changes to commit"
+          else
+            timestamp=$(date -u)
+            git commit -m "Auto-update data: ${timestamp}"
+            
+            # PENTING: Pull dulu sebelum push untuk hindari conflict
+            git pull --rebase origin main
+            git push
+          fi
