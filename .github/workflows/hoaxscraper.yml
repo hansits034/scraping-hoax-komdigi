@@ -4,7 +4,7 @@ on:
   schedule:
     # Jalan setiap 4 jam (00:00, 04:00, 08:00 UTC, dst)
     # Waktu Indonesia (WIB) = Jam UTC + 7
-    - cron: '0 */4 * * *'
+    - cron: '0 17 * * *'
   workflow_dispatch: # Agar bisa di-klik tombol "Run workflow" manual untuk tes
 
 # Memberikan izin kepada bot untuk melakukan 'git push'
