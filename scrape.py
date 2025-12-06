@@ -12,7 +12,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 # --- KONFIGURASI ---
 LIST_URL = "https://www.komdigi.go.id/berita/berita-hoaks"
 CSV_FILE = "hoax_data_complete.csv"
-MAX_PAGES = 1298  # Ubah jumlah halaman yang ingin diambil
+MAX_PAGES = 3  # Ubah jumlah halaman yang ingin diambil
 
 def setup_driver():
     options = webdriver.ChromeOptions()
@@ -208,6 +208,7 @@ if __name__ == "__main__":
     finally:
         print("Menutup browser...")
         driver.quit()
+
 
 
 
