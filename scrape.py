@@ -1,6 +1,7 @@
 import pandas as pd
 import time
 import os
+import numpy as np # Ditambahkan untuk menangani NaN
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -12,33 +13,54 @@ from webdriver_manager.chrome import ChromeDriverManager
 # --- KONFIGURASI ---
 LIST_URL = "https://www.komdigi.go.id/berita/berita-hoaks"
 CSV_FILE = "hoax_data_complete.csv"
-MAX_PAGES = 3  # Ubah jumlah halaman yang ingin diambil
+MAX_PAGES = 3 # Ubah jumlah halaman yang ingin diambil
+
+# --- FUNGSI BARU: Title Extractor ---
+def extract_title_from_url(url):
+    """
+    Fungsi untuk mengekstrak judul dari URL berita (untuk pembersihan kolom title).
+    """
+    if pd.isna(url) or url == "":
+        return ""
+    try:
+        # Ambil bagian terakhir dari URL (slug)
+        slug = url.strip().split('/')[-1]
+        
+        # Hapus 'hoaks-' di awal jika ada (panjang "hoaks-" adalah 6 karakter)
+        if slug.lower().startswith("hoaks-"):
+            slug = slug[6:]
+        
+        # Ganti tanda strip (-) dengan spasi
+        clean_text = slug.replace("-", " ")
+        
+        # Ubah menjadi Huruf Kapital Di Setiap Awal Kata (Title Case)
+        return clean_text.title()
+    except:
+        return ""
+# --- AKHIR FUNGSI BARU ---
+
 
 def setup_driver():
     options = webdriver.ChromeOptions()
     # --- PENGATURAN WAJIB UNTUK GITHUB ACTIONS / SERVER ---
-    
-    # 1. Mode tanpa layar (Headless) - Wajib di server
-    options.add_argument("--headless=new") 
-    
-    # 2. Mengatur ukuran layar virtual agar elemen 'terlihat' oleh kode
+    options.add_argument("--headless=new")
     options.add_argument("--start-maximized")
     options.add_argument("--window-size=1920,1080")
-    
-    # 3. Mengatasi isu permission & memori di Linux/Docker container
     options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage") # Penting agar tidak crash memori
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--remote-debugging-port=9222")
-
-    # 4. Anti-Deteksi Bot (Agar tidak diblokir Cloudflare/WAF)
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--disable-notifications")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
+    # Mencegah logging spam
+    options.add_experimental_option("excludeSwitches", ["enable-logging"])
+    
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     return driver
 
+# --- Fungsi remove_widgets dan visualize_click_point (Tidak diubah) ---
 def remove_widgets(driver):
     """Hapus widget yang menutupi"""
     try:
@@ -73,6 +95,8 @@ def visualize_click_point(driver, element):
         """, element)
         time.sleep(1.5) # Jeda sebentar untuk melihat titik
     except: pass
+# ----------------------------------------------------------------------
+
 
 def scrape_listing_and_nav(driver, max_pages):
     existing_urls = set()
@@ -106,11 +130,13 @@ def scrape_listing_and_nav(driver, max_pages):
                 try:
                     link_el = article.find_element(By.TAG_NAME, "a")
                     url = link_el.get_attribute("href")
-                    title = link_el.text
+                    # title diambil dari text anchor, nanti akan diperbaiki lagi di akhir
+                    title = link_el.text 
 
                     if url in existing_urls: continue
 
                     try:
+                        # Ambil tanggal dari elemen terakhir
                         date = article.find_elements(By.CSS_SELECTOR, "div.font-medium span")[-1].text
                     except: date = "-"
 
@@ -133,9 +159,7 @@ def scrape_listing_and_nav(driver, max_pages):
         # -----------------------------------------------------------
         if current_page < max_pages:
             try:
-                print(">> Mencari tombol Next...")
-                
-                # XPath Fingerprint SVG (Tetap dipakai karena akurat)
+                # ... (Logika navigasi tetap sama)
                 xpath_fingerprint = "//*[name()='path' and contains(@d, 'M10.2 9L13.8')]/ancestor::button"
                 candidates = driver.find_elements(By.XPATH, xpath_fingerprint)
                 
@@ -155,7 +179,6 @@ def scrape_listing_and_nav(driver, max_pages):
                 actions = ActionChains(driver)
                 actions.move_to_element(next_btn).click().perform()
                 
-                # --- PERUBAHAN: HANYA SLEEP SAJA ---
                 print(">> Menunggu 5 detik untuk reload halaman...")
                 time.sleep(5) 
                 
@@ -173,6 +196,7 @@ def scrape_details(driver):
     if not os.path.exists(CSV_FILE): return
 
     df = pd.read_csv(CSV_FILE)
+    # Targetkan hanya data yang content-nya masih kosong
     targets = df[df['content'].isnull()].index
     
     print(f"\n=== MENGAMBIL DETAIL KONTEN ({len(targets)} Artikel) ===")
@@ -183,32 +207,58 @@ def scrape_details(driver):
         
         try:
             driver.get(url)
+            # --- Perbaikan untuk scraping konten (menggunakan class yang umum di Komdigi) ---
             try:
+                # Coba custom-body, jika tidak ada, WebDriverWait akan timeout
                 WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CLASS_NAME, "custom-body")))
                 content = driver.find_element(By.CLASS_NAME, "custom-body").text
                 df.at[idx, 'content'] = content
                 print("   -> Konten tersimpan.")
             except:
-                print("   -> Konten tidak ditemukan/Timeout.")
-                df.at[idx, 'content'] = "ERR_NOT_FOUND"
+                print("   -> Konten tidak ditemukan/Timeout. Diisi ERR_NOT_FOUND.")
+                # Isi dengan NaN atau string error, agar bisa dicoba lagi atau di-filter
+                df.at[idx, 'content'] = "ERR_NOT_FOUND" 
         except Exception as e:
             print(f"   -> Error Link: {e}")
-        
+            df.at[idx, 'content'] = "ERR_LINK_FAILED" # Jika URL benar-benar gagal diakses
+            
+        # Simpan setiap 5 data
         if (i+1) % 5 == 0: df.to_csv(CSV_FILE, index=False)
         time.sleep(1)
 
     df.to_csv(CSV_FILE, index=False)
-    print("\n=== SEMUA PROSES SELESAI ===")
+    print("\n=== Tahap Detail Scraping Selesai ===")
+    return df # Mengembalikan DataFrame untuk Tahap 3
+
+def clean_titles(df):
+    """TAHAP 3: Membersihkan dan mengisi kolom Title menggunakan URL"""
+    print("\n=== TAHAP 3: Pembersihan dan Pengisian Kolom Title ===")
+    
+    # Terapkan fungsi extract_title_from_url ke kolom 'url'
+    df['title'] = df['url'].apply(extract_title_from_url)
+    
+    # Simpan kembali ke CSV setelah title di-update
+    df.to_csv(CSV_FILE, index=False, quoting=1)
+    
+    print(f"✅ Kolom 'title' berhasil diperbarui dan disimpan kembali ke {CSV_FILE}.")
+    if not df.empty:
+        print(f"Contoh judul terbersih: {df['title'].iloc[0]}")
+    
+    return df
 
 if __name__ == "__main__":
     driver = setup_driver()
     try:
+        # TAHAP 1: Scraping List & Navigasi
         scrape_listing_and_nav(driver, MAX_PAGES)
-        scrape_details(driver)
+        
+        # TAHAP 2: Scraping Detail Konten
+        df = scrape_details(driver)
+        
+        # TAHAP 3: Pembersihan dan Pengisian Judul
+        if df is not None:
+             clean_titles(df)
+
     finally:
         print("Menutup browser...")
         driver.quit()
-
-
-
-
